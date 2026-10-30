@@ -1,0 +1,36 @@
+name: Validate installer archive fix
+on:
+  push:
+    branches: [ci/installer-archive-validation]
+permissions:
+  contents: read
+jobs:
+  swift-tests:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact proposed fix
+        run: |
+          git clone --single-branch --branch fix/installer-archive-detection https://github.com/Mr-xiongyq/WonderBox.git .
+          test "$(git rev-parse HEAD)" = "b2618e8ae216ee906d2596a3d4d607995c4951f2"
+          sw_vers
+          swift --version
+      - name: Prove the regression tests fail with the original classifier
+        shell: bash
+        run: |
+          git show 9f232c01b7257b70ad88259c77184d1a72269847:Sources/WonderBox/Services/FileSystemServices.swift > Sources/WonderBox/Services/FileSystemServices.swift
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          path = Path('Sources/WonderBox/Services/FileSystemServices.swift')
+          path.write_text(path.read_text().replace('private static func installerFiles(in directory: URL)', 'static func installerFiles(in directory: URL)'))
+          PYTHON
+          if swift test --filter InstallerArchiveTests > "$RUNNER_TEMP/installer-baseline.log" 2>&1; then
+            cat "$RUNNER_TEMP/installer-baseline.log"
+            echo "Expected the original classifier to fail the regression tests."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/installer-baseline.log"
+          grep -F "Test Suite 'InstallerArchiveTests' failed" "$RUNNER_TEMP/installer-baseline.log"
+          git restore Sources/WonderBox/Services/FileSystemServices.swift
+      - name: Run the complete test suite with the fix
+        run: swift test
